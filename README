@@ -1,0 +1,21 @@
+Требования
+Python 3.9 или выше.
+Токен Telegram-бота (получить можно у @BotFather).
+Установка и запуск
+Клонируйте репозиторий: git clone https://github.com/ВАШ_ЛОГИН/translator-bot.git cd translator-bot
+
+Создайте и активируйте виртуальное окружение: python -m venv venv source venv/bin/activate # Для Linux/macOS venv\Scripts\activate # Для Windows
+
+Установите зависимости: pip install -r requirements.txt
+
+Создайте конфигурационный файл: Создайте файл .env в корневой директории и добавьте ваш токен: BOT_TOKEN=ваш_токен_бота
+
+Запустите бота: python bot.py
+
+Использование
+Отправьте боту команду в формате: /translate <код_языка> <текст>
+
+Пример:
+
+/translate ru Hello, how are you?
+/translate en Привет, мир!
