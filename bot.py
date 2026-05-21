@@ -1,106 +1,123 @@
-import asyncio
-import logging
+""" НАСТРОЙКА ФАЙЛА .ENV
+BOT_TOKEN = *************************************
+HELP_URL = https://api.mymemory.translated.net/get
+LIBRETRANSLATE_URL = https://translate.argosopentech.com/translate
+"""
 import os
-import aiohttp
+import logging
+import requests
+import telebot
 from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, CommandObject
 
-# =====================================================================
-# CONFIGURATION & LOGGING
-# =====================================================================
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("Не найден BOT_TOKEN в файле .env")
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-# =====================================================================
-# API SERVICE LOGIC (Функция работы с переводчиком)
-# =====================================================================
-async def translate_text(target_lang: str, text: str) -> str:
-    url = os.getenv("LIBRETRANSLATE_URL", "https://translate.argosopentech.com/translate")
-    api_key = os.getenv("LIBRETRANSLATE_API_KEY", "")
-    payload = {
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_URL = os.getenv("LIBRETRANSLATE_URL")
+HELP_URL = os.getenv("HELP_URL")
+
+if not BOT_TOKEN or "8881794510:AAEZy" in BOT_TOKEN and "*" in BOT_TOKEN:
+    exit("Критическая ошибка: Пожалуйста, укажите реальный BOT_TOKEN в файле .env")
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def translate_text(text: str, target_lang: str) -> str:
+    url = HELP_URL
+    params = {
         "q": text,
-        "source": "auto",  # Автоматическое определение языка
-        "target": target_lang,
-        "format": "text",
-        "api_key": api_key
+        "langpair": f"Autodetect|{target_lang}"
     }
-    headers = {"Content-Type": "application/json"}
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("translatedText", "Ошибка: пустой ответ от сервера.")
-                elif response.status == 400:
-                    return "Ошибка 400: Неверно указан язык или некорректный запрос."
-                elif response.status == 429:
-                    return "Ошибка 429: Слишком много запросов. Попробуйте позже."
-                else:
-                    return f"Ошибка API: {response.status}."
-    except aiohttp.ClientError as e:
-        logger.error(f"Сетевая ошибка при обращении к API: {e}")
-        return "Проблема с сетью: API переводчика временно недоступно."
-    except Exception as e:
-        logger.error(f"Неизвестная ошибка: {e}")
-        return "Произошла непредвиденная ошибка при обработке перевода."
+        response = requests.get(url, params=params, timeout=10)
 
-# =====================================================================
-# TELEGRAM BOT HANDLERS (Обработчики команд)
-# =====================================================================
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    welcome_text = (
-        "👋 Привет! Я бот-переводчик.\n\n"
-        "Я могу переводить текст на разные языки с помощью LibreTranslate.\n"
-        "Отправь /help, чтобы узнать, как мной пользоваться."
+        if response.status_code == 200:
+            data = response.json()
+            # MyMemory возвращает статус 200 даже при внутренних ошибках (например, исчерпан лимит)
+            if data.get("responseStatus") == 200:
+                return data["responseData"]["translatedText"]
+            else:
+                return f"Ошибка API: {data.get('responseDetails')}"
+        else:
+            return f"Ошибка API ({response.status_code})"
+
+    except requests.exceptions.RequestException as e:
+        return f"Ошибка сети при запросе к API: {e}"
+
+
+# --- ОБРАБОТЧИКИ КОМАНД TELEGRAM ---
+
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    text = (
+        "Привет! Я бот-переводчик.\n"
+        "Я использую внешний API для перевода текста.\n\n"
+        "Отправь команду в формате:\n"
+        "/translate <язык> <текст>\n"
+        "Пример: /translate en Привет, мир!\n\n"
+        "Для просмотра справки нажми /help"
     )
-    await message.answer(welcome_text)
+    bot.send_message(message.chat.id, text)
 
-@dp.message(Command("help"))
-async def cmd_help(message: types.Message):
-    help_text = (
-        "📖 **Справка по использованию:**\n\n"
-        "Чтобы перевести текст, используйте команду `/translate`.\n\n"
-        "**Формат:**\n"
-        "`/translate <код_языка> <текст>`\n\n"
-        "**Примеры:**\n"
-        "`/translate en Привет, мир!` — переведет на английский.\n"
-        "`/translate fr Доброе утро` — переведет на французский."
+
+@bot.message_handler(commands=['help'])
+def cmd_help(message):
+    text = (
+        "Доступные команды:\n"
+        "/start - Приветствие\n"
+        "/help - Вызов этой справки\n"
+        "/translate <код_языка> <текст> - Перевести текст\n\n"
+        "Популярные коды языков:\n"
+        "ru - русский\n"
+        "en - английский\n"
+        "es - испанский\n"
+        "de - немецкий\n"
+        "fr - французский"
     )
-    await message.answer(help_text, parse_mode="Markdown")
+    bot.send_message(message.chat.id, text)
 
-@dp.message(Command("translate"))
-async def cmd_translate(message: types.Message, command: CommandObject):
-    if command.args is None:
-        await message.answer("Ошибка: Вы не ввели аргументы.\nИспользуйте формат: `/translate en Привет!`", parse_mode="Markdown")
+
+@bot.message_handler(commands=['translate'])
+def cmd_translate(message):
+    args = message.text.split(maxsplit=2)
+
+    if len(args) < 3:
+        bot.send_message(
+            message.chat.id,
+            "Неверный формат команды!\n"
+            "Используй: /translate <код_языка> <текст>\n"
+            "Пример: /translate ru Hello"
+        )
         return
-    args_split = command.args.split(" ", maxsplit=1)
-    if len(args_split) < 2:
-        await message.answer("Ошибка: Недостаточно аргументов.\nИспользуйте формат: `/translate <язык> <текст>`", parse_mode="Markdown")
-        return
-    target_lang = args_split[0]
-    text_to_translate = args_split[1]
-    wait_message = await message.answer("⏳ Перевожу...")
-    # Вызываем функцию, которая теперь находится в этом же файле
-    translated_result = await translate_text(target_lang, text_to_translate)
 
-    await wait_message.edit_text(f"**Перевод:**\n{translated_result}", parse_mode="Markdown")
+    target_lang = args[1].lower()
+    text_to_translate = args[2]
 
-# =====================================================================
-# MAIN RUNNER
-# =====================================================================
-async def main():
-    print("Бот запущен из одного файла...")
-    await dp.start_polling(bot)
+    processing_msg = bot.send_message(message.chat.id, "🔄 Перевожу...")
+
+    result = translate_text(text_to_translate, target_lang)
+
+    bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=processing_msg.message_id,
+        text=result
+    )
+
+
+@bot.message_handler(func=lambda message: True)
+def handle_unknown(message):
+    """Обработка любого текста без команд"""
+    bot.send_message(message.chat.id, "Пожалуйста, используй команду /translate для перевода текста. Подробнее: /help")
+
+
+# --- ЗАПУСК БОТА ---
+
 if __name__ == "__main__":
+    logging.info("Бот запущен. Нажмите Ctrl+C для остановки.")
     try:
-        asyncio.run(main())
+        # infinity_polling автоматически обрабатывает падения и переподключается
+        bot.infinity_polling()
     except KeyboardInterrupt:
-        print("Бот остановлен.")
+        print("\nБот остановлен вручную.")
